@@ -9,9 +9,11 @@ const path = require("path")
 const { v4: uuidv4 } = require("uuid")
 const helmet = require("helmet")
 const rateLimit = require("express-rate-limit")
+const cors = require("cors")
 
 const app = express()
 
+app.use(cors())
 app.use(express.json())
 app.use(express.static(__dirname))
 
@@ -78,8 +80,7 @@ app.post("/register",(req,res)=>{
 app.post("/login",(req,res)=>{
   const {email,password} = req.body
 
-  const user = db.prepare("SELECT * FROM users WHERE email=?")
-    .get(email)
+  const user = db.prepare("SELECT * FROM users WHERE email=?").get(email)
 
   if(!user) return res.status(404).json({error:"User not found"})
 
@@ -129,19 +130,15 @@ app.get("/download/:id",(req,res)=>{
   res.sendFile(path.join(__dirname,"download.html"))
 })
 
-// ================= DOWNLOAD STREAM =================
+// ================= DOWNLOAD =================
 app.get("/download-file/:id",(req,res)=>{
 
   const id = req.params.id
 
-  const row = db.prepare("SELECT * FROM downloads WHERE id=?")
-    .get(id)
+  const row = db.prepare("SELECT * FROM downloads WHERE id=?").get(id)
 
   if(!row) return res.status(404).send("Invalid ❌")
-
-  if(Date.now() > row.expires_at)
-    return res.status(403).send("Expirado ⛔")
-
+  if(Date.now() > row.expires_at) return res.status(403).send("Expirado ⛔")
   if(row.downloads_count >= row.max_downloads)
     return res.status(403).send("Limite atingido 🚫")
 
@@ -168,7 +165,7 @@ app.get("/download-file/:id",(req,res)=>{
 
 // ================= HOME =================
 app.get("/",(req,res)=>{
-  res.sendFile(path.join(__dirname,"index.html"))
+  res.send("Lukintosh Downloader 🚀")
 })
 
 // ================= START =================
