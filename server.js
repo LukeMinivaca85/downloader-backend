@@ -1,7 +1,7 @@
 require("dotenv").config()
 
 const express = require("express")
-const sqlite3 = require("sqlite3").verbose()
+const Database = require("better-sqlite3")
 const bcrypt = require("bcrypt")
 const jwt = require("jsonwebtoken")
 const https = require("https")
@@ -22,17 +22,17 @@ app.use(rateLimit({
 }))
 
 // ================= DATABASE =================
-const db = new sqlite3.Database("./database.db")
+const db = new Database("database.db")
 
-db.run(`
+db.prepare(`
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   email TEXT UNIQUE,
   password TEXT
 )
-`)
+`).run()
 
-db.run(`
+db.prepare(`
 CREATE TABLE IF NOT EXISTS downloads (
   id TEXT PRIMARY KEY,
   url TEXT,
@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS downloads (
   max_downloads INTEGER,
   downloads_count INTEGER DEFAULT 0
 )
-`)
+`).run()
 
 // ================= AUTH =================
 function auth(req,res,next){
@@ -62,35 +62,37 @@ app.post("/register",(req,res)=>{
   if(!email || !password)
     return res.status(400).json({error:"Missing data"})
 
-  bcrypt.hash(password,10,(err,hash)=>{
-    db.run("INSERT INTO users (email,password) VALUES (?,?)",
-    [email,hash],
-    (err)=>{
-      if(err) return res.status(400).json({error:"User exists"})
-      res.json({message:"Conta criada 🚀"})
-    })
-  })
+  const hash = bcrypt.hashSync(password,10)
+
+  try{
+    db.prepare("INSERT INTO users (email,password) VALUES (?,?)")
+      .run(email,hash)
+
+    res.json({message:"Conta criada 🚀"})
+  }catch{
+    res.status(400).json({error:"User exists"})
+  }
 })
 
 // ================= LOGIN =================
 app.post("/login",(req,res)=>{
   const {email,password} = req.body
 
-  db.get("SELECT * FROM users WHERE email=?",[email],async (err,user)=>{
+  const user = db.prepare("SELECT * FROM users WHERE email=?")
+    .get(email)
 
-    if(!user) return res.status(404).json({error:"User not found"})
+  if(!user) return res.status(404).json({error:"User not found"})
 
-    const valid = await bcrypt.compare(password,user.password)
-    if(!valid) return res.status(401).json({error:"Wrong password"})
+  const valid = bcrypt.compareSync(password,user.password)
+  if(!valid) return res.status(401).json({error:"Wrong password"})
 
-    const token = jwt.sign(
-      { id:user.id, email:user.email },
-      process.env.JWT_SECRET,
-      { expiresIn:"7d" }
-    )
+  const token = jwt.sign(
+    { id:user.id, email:user.email },
+    process.env.JWT_SECRET,
+    { expiresIn:"7d" }
+  )
 
-    res.json({token})
-  })
+  res.json({token})
 })
 
 // ================= FILES =================
@@ -106,59 +108,61 @@ app.post("/request-trial", auth, (req,res)=>{
   const product = req.body.product
   const fileUrl = files[product]
 
-  if(!fileUrl) return res.status(400).json({error:"Invalid product"})
+  if(!fileUrl)
+    return res.status(400).json({error:"Invalid product"})
 
   const id = uuidv4()
   const expiresAt = Date.now() + (1000 * 60 * 30)
 
-  db.run(`
+  db.prepare(`
     INSERT INTO downloads (id,url,expires_at,max_downloads)
     VALUES (?,?,?,?)
-  `,[id,fileUrl,expiresAt,5])
+  `).run(id,fileUrl,expiresAt,5)
 
   res.json({
     link: `${process.env.BASE_URL}/download/${id}`
   })
 })
 
-// ================= PAGE =================
+// ================= DOWNLOAD PAGE =================
 app.get("/download/:id",(req,res)=>{
   res.sendFile(path.join(__dirname,"download.html"))
 })
 
-// ================= DOWNLOAD =================
+// ================= DOWNLOAD STREAM =================
 app.get("/download-file/:id",(req,res)=>{
 
   const id = req.params.id
 
-  db.get("SELECT * FROM downloads WHERE id=?",[id],(err,row)=>{
+  const row = db.prepare("SELECT * FROM downloads WHERE id=?")
+    .get(id)
 
-    if(!row) return res.status(404).send("Invalid ❌")
-    if(Date.now() > row.expires_at)
-      return res.status(403).send("Expirado ⛔")
-    if(row.downloads_count >= row.max_downloads)
-      return res.status(403).send("Limite atingido 🚫")
+  if(!row) return res.status(404).send("Invalid ❌")
 
-    db.run(`
-      UPDATE downloads
-      SET downloads_count = downloads_count + 1
-      WHERE id=?
-    `,[id])
+  if(Date.now() > row.expires_at)
+    return res.status(403).send("Expirado ⛔")
 
-    https.get(row.url,(r)=>{
+  if(row.downloads_count >= row.max_downloads)
+    return res.status(403).send("Limite atingido 🚫")
 
-      res.setHeader("Content-Type","application/octet-stream")
-      res.setHeader("Content-Disposition","attachment")
+  db.prepare(`
+    UPDATE downloads
+    SET downloads_count = downloads_count + 1
+    WHERE id=?
+  `).run(id)
 
-      if(r.headers["content-length"])
-        res.setHeader("Content-Length", r.headers["content-length"])
+  https.get(row.url,(r)=>{
 
-      r.pipe(res)
+    res.setHeader("Content-Type","application/octet-stream")
+    res.setHeader("Content-Disposition","attachment")
 
-    }).on("error",()=>{
-      res.status(500).send("Erro no download")
-    })
+    if(r.headers["content-length"])
+      res.setHeader("Content-Length", r.headers["content-length"])
 
+    r.pipe(res)
+
+  }).on("error",()=>{
+    res.status(500).send("Erro no download")
   })
 })
 
@@ -169,4 +173,4 @@ app.get("/",(req,res)=>{
 
 // ================= START =================
 const PORT = process.env.PORT || 3000
-app.listen(PORT, ()=>console.log("🚀 Rodando", PORT))
+app.listen(PORT, ()=>console.log("🚀 Rodando na porta", PORT))
