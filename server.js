@@ -5,19 +5,31 @@ const Database = require("better-sqlite3")
 const bcrypt = require("bcrypt")
 const jwt = require("jsonwebtoken")
 const https = require("https")
+const http = require("http")
 const path = require("path")
 const { v4: uuidv4 } = require("uuid")
 const helmet = require("helmet")
 const rateLimit = require("express-rate-limit")
 const cors = require("cors")
 
+// ================= INIT =================
+if(!process.env.JWT_SECRET){
+  throw new Error("JWT_SECRET não definido no .env")
+}
+
 const app = express()
 
-app.use(cors())
+app.use(cors({
+  origin: process.env.BASE_URL
+}))
+
 app.use(express.json())
-app.use(express.static(__dirname))
+
+// 🔥 CORREÇÃO PRINCIPAL (NUNCA __dirname)
+app.use(express.static(path.join(__dirname, "public")))
 
 app.use(helmet())
+
 app.use(rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100
@@ -127,7 +139,7 @@ app.post("/request-trial", auth, (req,res)=>{
 
 // ================= DOWNLOAD PAGE =================
 app.get("/download/:id",(req,res)=>{
-  res.sendFile(path.join(__dirname,"download.html"))
+  res.sendFile(path.join(__dirname,"public","download.html"))
 })
 
 // ================= DOWNLOAD =================
@@ -148,7 +160,9 @@ app.get("/download-file/:id",(req,res)=>{
     WHERE id=?
   `).run(id)
 
-  https.get(row.url,(r)=>{
+  const client = row.url.startsWith("https") ? https : http
+
+  client.get(row.url,(r)=>{
 
     res.setHeader("Content-Type","application/octet-stream")
     res.setHeader("Content-Disposition","attachment")
