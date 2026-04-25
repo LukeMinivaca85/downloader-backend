@@ -20,7 +20,11 @@ if(!process.env.JWT_SECRET){
 const app = express()
 
 app.use(cors({
-  origin: process.env.BASE_URL
+  origin: [
+    "https://downloader.lukintosh.com"
+  ],
+  methods: ["GET","POST"],
+  allowedHeaders: ["Content-Type","Authorization"]
 }))
 
 app.use(express.json())
